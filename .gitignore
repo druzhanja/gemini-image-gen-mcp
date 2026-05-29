@@ -1,0 +1,19 @@
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Generated images (temporary, auto-cleaned after 24h)
+images/
+
+# OS
+.DS_Store
+Thumbs.db
