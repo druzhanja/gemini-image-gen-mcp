@@ -306,9 +306,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     upload_to_site = bool(arguments.get("upload_to_site"))
     site_url       = None
 
-    if upload_to_site:
-        if not _ASELEX_TOKEN:
-            return [TextContent(type="text", text="❌ ASELEX_UPLOAD_TOKEN env var is not set — add it to MCP server config")]
+    if upload_to_site and _ASELEX_TOKEN:
         site_url = _upload_to_aselex(image_bytes, out_path.name, _ASELEX_TOKEN)
         if not site_url:
             return [TextContent(type="text", text="❌ Upload to aselex.app failed — check token and server connectivity")]
