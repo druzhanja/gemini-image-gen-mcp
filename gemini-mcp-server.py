@@ -31,6 +31,7 @@ import re
 import sys
 import time
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from mcp.server import Server
@@ -167,6 +168,10 @@ async def list_tools() -> list[Tool]:
                         "type": "boolean",
                         "description": "If true — upload generated image to aselex.app and return 'url' field in response. Token is read from ASELEX_UPLOAD_TOKEN env var. Default: false.",
                     },
+                    "cleanup_days": {
+                        "type": "integer",
+                        "description": "Delete files in the output directory older than N days. 0 = never delete. Default: 1.",
+                    },
                 },
                 "required": ["prompt"],
             },
@@ -220,12 +225,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if not prompt:
         return [TextContent(type="text", text="❌ 'prompt' is required")]
 
-    fmt         = (arguments.get("format") or "jpeg").lower()
-    width       = int(arguments.get("width") or 1200)
-    height      = int(arguments.get("height") or 630)
-    quality     = int(arguments.get("quality") or 82)
-    max_size_kb = int(arguments.get("max_size_kb") or 200)
-    output_dir  = (arguments.get("output_dir") or "").strip()
+    fmt          = (arguments.get("format") or "jpeg").lower()
+    width        = int(arguments.get("width") or 1200)
+    height       = int(arguments.get("height") or 630)
+    quality      = int(arguments.get("quality") or 82)
+    max_size_kb  = int(arguments.get("max_size_kb") or 200)
+    output_dir   = (arguments.get("output_dir") or "").strip()
+    cleanup_days = int(arguments.get("cleanup_days") if arguments.get("cleanup_days") is not None else 1)
 
     # Деривація відсутніх метаданих із prompt
     clean_prompt = re.sub(r"^\s*draw\s+", "", prompt, flags=re.IGNORECASE).strip()
@@ -271,15 +277,27 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     except Exception as e:
         return [TextContent(type="text", text=f"❌ Image processing error: {e}")]
 
-    # Зберігаємо файл (розширення береться з output_file, вже має бути .jpg/.webp)
-    out_path = (Path(output_dir) if output_dir else _SCRIPT_DIR / "images") / output_file
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Зберігаємо файл — структура images/YYYY/MM/
+    date_subdir = datetime.now().strftime("%Y/%m")
+    base_dir    = Path(output_dir) if output_dir else _SCRIPT_DIR / "images"
+    month_dir   = base_dir / date_subdir
+    month_dir.mkdir(parents=True, exist_ok=True)
 
-    # Видаляємо локальні зображення старші 24 годин
-    cutoff = time.time() - 86400
-    for old_file in out_path.parent.iterdir():
-        if old_file.is_file() and old_file.stat().st_mtime < cutoff:
-            old_file.unlink(missing_ok=True)
+    # Вирішуємо конфлікти імен: file.jpg → file-2.jpg → file-3.jpg
+    stem     = Path(output_file).stem
+    suffix   = Path(output_file).suffix
+    out_path = month_dir / output_file
+    counter  = 2
+    while out_path.exists():
+        out_path = month_dir / f"{stem}-{counter}{suffix}"
+        counter += 1
+
+    # Видаляємо файли в поточному місяці старші cleanup_days (0 = не видаляти)
+    if cleanup_days > 0:
+        cutoff = time.time() - cleanup_days * 86400
+        for old_file in month_dir.iterdir():
+            if old_file.is_file() and old_file != out_path and old_file.stat().st_mtime < cutoff:
+                old_file.unlink(missing_ok=True)
 
     out_path.write_bytes(image_bytes)
 

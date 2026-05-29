@@ -15,10 +15,11 @@
  *   {"ok": false, "error": "..."}
  */
 
-define('UPLOAD_TOKEN', 'REPLACE_WITH_YOUR_SECRET_TOKEN');
-define('UPLOAD_DIR',   __DIR__ . '/images/');
-define('BASE_URL',     'https://aselex.app/uploads/images/');
-define('MAX_SIZE',     16 * 1024 * 1024); // 16 MB
+define('UPLOAD_TOKEN',  'REPLACE_WITH_YOUR_SECRET_TOKEN');
+define('BASE_UPLOAD',   __DIR__ . '/images/');
+define('BASE_URL',      'https://aselex.app/uploads/images/');
+define('MAX_SIZE',      16 * 1024 * 1024); // 16 MB
+define('CLEANUP_DAYS',  1);               // 0 = ніколи не видаляти
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -68,28 +69,45 @@ if ($safe_name === '' || $safe_name === '_') {
     $safe_name = 'image_' . time() . '.jpg';
 }
 
-// 6. Видаляємо файли старші 24 годин
-foreach (glob(UPLOAD_DIR . '*') ?: [] as $f) {
-    if (is_file($f) && time() - filemtime($f) > 86400) {
-        unlink($f);
+// 6. Директорія images/YYYY/MM/
+$date_subdir = date('Y/m');
+$upload_dir  = BASE_UPLOAD . $date_subdir . '/';
+
+if (!is_dir($upload_dir)) {
+    mkdir($upload_dir, 0755, true);
+}
+
+// 7. Вирішуємо конфлікти імен: file.jpg → file-2.jpg → file-3.jpg
+$info    = pathinfo($safe_name);
+$stem    = $info['filename'];
+$ext     = isset($info['extension']) ? '.' . $info['extension'] : '';
+$dest    = $upload_dir . $safe_name;
+$counter = 2;
+while (file_exists($dest)) {
+    $dest = $upload_dir . $stem . '-' . $counter . $ext;
+    $counter++;
+}
+$final_name = basename($dest);
+
+// 8. Видаляємо файли в поточному місяці старші CLEANUP_DAYS (0 = не видаляти)
+if (CLEANUP_DAYS > 0) {
+    $cutoff = time() - CLEANUP_DAYS * 86400;
+    foreach (glob($upload_dir . '*') ?: [] as $f) {
+        if (is_file($f) && filemtime($f) < $cutoff) {
+            unlink($f);
+        }
     }
 }
 
-// 7. Зберігаємо
-if (!is_dir(UPLOAD_DIR)) {
-    mkdir(UPLOAD_DIR, 0755, true);
-}
-
-$dest = UPLOAD_DIR . $safe_name;
-
+// 9. Зберігаємо
 if (!move_uploaded_file($file['tmp_name'], $dest)) {
     error_response(500, 'Failed to save file');
 }
 
 chmod($dest, 0644);
 
-// 8. Відповідь
+// 10. Відповідь
 echo json_encode([
     'ok'  => true,
-    'url' => BASE_URL . rawurlencode($safe_name),
+    'url' => BASE_URL . $date_subdir . '/' . rawurlencode($final_name),
 ], JSON_UNESCAPED_SLASHES);
